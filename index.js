@@ -1932,16 +1932,6 @@ class MemoryEditInterface {
         let result = this.popup.show();  // gotta go before init_pagination so the update
         this.update_table()
 
-        // Set initial height for text areas.
-        // I know that update() also does this, but for some reason the first time it's called it doesn't set it right.
-        // Some have the right height, but some longer texts don't. It's like the width of the popup is smaller,
-        //  so when the scrollHeight is found in update(), the lines wrap sooner. Not sure where this could be happening.
-        // It's not the stylesheet getting set late, as putting `width: 100%` on the html itself doesn't help.
-        this.$content.find('tr textarea').each(function () {
-            this.style.height = 'auto'
-            this.style.height = this.scrollHeight + "px";
-        })
-
         if (this.settings.reverse_page_sort) {
             this.scroll_to_bottom()
         }
@@ -2235,14 +2225,6 @@ class MemoryEditInterface {
             }
         }
 
-        // If no memory, set the placeholder text to the error
-        if (!memory) {
-            $memory.attr('placeholder', `${error}`);
-        } else {
-            $memory[0].style.height = "auto";  // fixes some weird behavior that just using scrollHeight causes.
-            $memory[0].style.height = $memory[0].scrollHeight + "px";  // set the initial height based on content
-        }
-
         // If the memory was edited, add the icon
         $memory.parent().find('i').remove()
         if (edited) {
@@ -2253,6 +2235,16 @@ class MemoryEditInterface {
         $memory.removeClass().addClass(css_message_div)  // to maintain the default styling
         if (style) {
             $memory.addClass(get_summary_style_class(msg))
+        }
+
+        // If no memory, set the placeholder text to the error
+        if (!memory) {
+            $memory.attr('placeholder', `${error}`);
+        } else {
+            // Setting these styles has to be done last or you get some weird behavior - the height of some text areas is too large.
+            // Don't know why this is, maybe it has something to do with the classes being set? Who knows.
+            $memory[0].style.height = "auto";  // fixes some weird behavior that just using scrollHeight causes.
+            $memory[0].style.height = $memory[0].scrollHeight + "px";  // set the initial height based on content
         }
 
         return $row  // return the row that was modified
@@ -3146,6 +3138,9 @@ class SummaryPromptEditInterface {
 
 // Message functions
 function set_data(message, key, value) {
+    // If values is unchanged, return immediately (can save a lot of operations, this function is called on every message in the chat every refresh)
+    if (message?.extra?.[MODULE_NAME]?.[key] === value) return;
+
     // store information on the message object
     if (!message.extra) {
         message.extra = {};
