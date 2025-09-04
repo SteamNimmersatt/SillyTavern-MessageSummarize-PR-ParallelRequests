@@ -123,6 +123,11 @@
                     <span>Progress Bar</span>
                 </label>
 
+                <label class="checkbox_label" title="Number of summaries to do in parallel (1 = one after another).">
+                    <input id="parallel_summaries_count" class="text_pole widthUnset inline_setting" type="number" min="1" max="999" />
+                    <span>Parallel summaries</span>
+                </label>
+
                 <label class="checkbox_label" title="Number of valid messages to wait before auto-summarizing (0 = summarize up to the most recent message, 1 = wait one message, etc.)">
                     <input id="summarization_delay" class="text_pole widthUnset inline_setting" type="number" min="0" max="999" />
                     <span>Message Lag</span>
@@ -255,7 +260,7 @@
                         <input id="long_term_context_limit" class="text_pole widthUnset inline_setting" type="number" min="0" max="99999" />
                         <span>Context (<span id="long_term_context_limit_display"></span> tk)</span>
                     </label>
-                   <div>
+                    <div>
                         <label>
                             <input type="radio" name="long_term_context_type" value="percent" />
                             <span>%</span>
