@@ -1988,13 +1988,16 @@ class MemoryEditInterface {
         // Updating the height of each row is a heavy operation. It requires reading scrollHeight then setting the height.
         // If you do this after every row, the entire layout would be reloaded each time causing a ton of lag.
         // Instead, we read all the heights first then set them all, allowing the browser to use a cached layout for all the reads.
+        // Still, on 1000/page just reading all the scrollHeights takes about 0.2s. But setting heights after that is negligible.
+        // This is the most time-consuming part of the update
         let heights = []
-        for (let id of this.displayed) {
-            heights.push(this.$table_body.find(`tr#memory_${id}`).find('textarea')[0].scrollHeight + 'px')
+        let $textareas = this.$table_body.find(`tr textarea`)
+        for (let textarea of $textareas) {
+            heights.push(textarea.scrollHeight + 'px')
         }
-        for (let i in this.displayed) {
-            let id = this.displayed[i]
-            this.$table_body.find(`tr#memory_${id}`).find('textarea').css('height', heights[i])
+        for (let i in heights) {
+            let textarea = $textareas[i]
+            textarea.style.height = heights[i]
         }
 
         this.update_selected()
