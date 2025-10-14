@@ -1,6 +1,12 @@
 # Changelog
 
-#### v1.2.9
+#### v1.2.15
+**ST Version Requirement**: You must be on ST v1.13.4
+**Fixed** Now waits for connection profile to load before continuing with summary
+**Fixed** Fixed major lag issues in memory editor especially on Edge
+**Fixed** Fixing lag issues when using high context for memory injection
+
+#### v1.2.7
 **ST Version Requirement**: You must be on ST v1.13.2
 **IMPORTANT**: Any profiles locked to specific chats (not characters) will need to be re-locked.
 **Fixed** Locking profiles to a chat now persist after branching.
@@ -8,8 +14,6 @@
 **Fixed** Time delay now applies to re-summarizations on swipe and continue if "Skip First" is disabled.
 **Fixed** Fixed regex scripts on macros failing to load properly
 **Fixed** Fixed bulk summarizations not going in the order of message IDs
-**Fixed** Fixed major lag issues in memory editor especially on Edge
-**Fixed** Fixing lag issues when using high context for memory injection
 
 #### v1.1.9
 **ST Version Requirement**: You must be on ST v1.13.2
