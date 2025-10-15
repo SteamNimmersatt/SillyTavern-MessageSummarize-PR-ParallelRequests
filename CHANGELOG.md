@@ -1,7 +1,7 @@
 # Changelog
 
-#### v1.2.15
-**ST Version Requirement**: You must be on ST v1.13.4
+#### v1.2.16
+**ST Version Requirement**: You must be on ST v1.13.5
 **Fixed** Now waits for connection profile to load before continuing with summary
 **Fixed** Fixed major lag issues in memory editor especially on Edge
 **Fixed** Fixing lag issues when using high context for memory injection
