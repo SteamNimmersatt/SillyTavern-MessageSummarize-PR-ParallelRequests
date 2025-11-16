@@ -4023,8 +4023,7 @@ function collect_messages_to_auto_summarize() {
     let depth = 0
     debug(`Collecting messages to summarize. Depth limit: ${depth_limit}, Lag: ${lag}`)
 
-    // Changed: summarize from chat beginning
-    for (let i = 0; i < context.chat.length-1; i++) {
+    for (let i = context.chat.length-1; i >= 0; i--) {
         // get current message
         let message = context.chat[i];
 
