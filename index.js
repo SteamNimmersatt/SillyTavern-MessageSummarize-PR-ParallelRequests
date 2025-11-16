@@ -120,7 +120,6 @@ const default_settings = {
 
     auto_summarize: true,   // whether to automatically summarize new chat messages
     summarization_delay: 0,  // delay auto-summarization by this many messages (0 summarizes immediately after sending, 1 waits for one message, etc)
-    summarize_from_top_edge: false,
     summarization_time_delay: 0, // time in seconds to delay between summarizations
     summarization_time_delay_skip_first: false,  // skip the first delay after a character message
     auto_summarize_batch_size: 1,  // number of messages to summarize at once when auto-summarizing
@@ -1018,7 +1017,6 @@ function refresh_settings() {
         get_settings_element('auto_summarize_progress')?.prop('disabled', !auto_summarize);
         get_settings_element('summarization_delay')?.prop('disabled', !auto_summarize);
         get_settings_element('parallel_summaries_count')?.prop('disabled', !auto_summarize);
-        get_settings_element('summarize_from_top_edge')?.prop('disabled', !auto_summarize);
 
         // If not excluding message, then disable the option to preserve the last user message
         let excluding_messages = get_settings('exclude_messages_after_threshold')
@@ -3921,22 +3919,7 @@ function collect_messages_to_auto_summarize() {
     debug(`Collecting messages to summarize. Depth limit: ${depth_limit}, Lag: ${lag}`)
 
     // Changed: summarize from chat beginning
-    const summarizeFromTopEdge = get_settings('summarize_from_top_edge')
-    const map = {
-        top: {
-            initialValue: 0,
-            conditionFn: (v) => v < context.chat.length-1,
-            iterationFn: (v) => v + 1
-        },
-        bottom: {
-            initialValue: context.chat.length-1,
-            conditionFn: (v) => v >= 0,
-            iterationFn: (v) => v - 1
-        }
-    }
-    const edgeSetting = summarizeFromTopEdge ? map.top : map.bottom
-
-    for (let i = edgeSetting.initialValue; edgeSetting.conditionFn(i); i = edgeSetting.iterationFn(i)) {
+    for (let i = 0; i < context.chat.length-1; i++) {
         // get current message
         let message = context.chat[i];
 
@@ -4185,7 +4168,6 @@ function initialize_settings_listeners() {
     bind_setting('#auto_summarize_on_send', 'auto_summarize_on_send', 'boolean');
     bind_setting('#parallel_summaries_count', 'parallel_summaries_count', 'number');
     bind_setting('#summarization_delay', 'summarization_delay', 'number');
-    bind_setting('#summarize_from_top_edge', 'summarize_from_top_edge', 'boolean');
     bind_setting('#summarization_time_delay', 'summarization_time_delay', 'number')
     bind_setting('#summarization_time_delay_skip_first', 'summarization_time_delay_skip_first', 'boolean')
 
