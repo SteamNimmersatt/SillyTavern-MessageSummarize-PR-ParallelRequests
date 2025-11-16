@@ -74,6 +74,7 @@ How this extension addresses these issues:
 #### Auto-Summarization
 - Here you can control how often your messages are automatically summarized, if at all. By default, summarizations will occur automatically right after a message is sent in the chat. The extension will go back in your chat and look for any messages that need to be summarized, following certain criteria (see the [Short-Term Memory Injection](#short-term-memory-injection) section). 
 - If you instead want previous messages to be summarized right *before* a new one is sent, choose `Before Generation`
+- The `Parallel summaries` setting controls how many messages will be summarized in parallel. Don't set this too high, it will do multiple API requests at once.
 - The `Message Lag` setting will make auto-summarization lag behind by the specified number of messages, useful if you only want things summarized once they've been in the chat for a while.
 - The `Batch Size` setting will wait the specified number of messages before summarizing all of them in sequence (they are still summarized individually).
 - The `Message Limit` setting will set an upper limit to how many messages to look backward in the chat when auto-summarizing.
