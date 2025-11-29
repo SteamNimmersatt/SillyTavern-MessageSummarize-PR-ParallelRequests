@@ -171,7 +171,7 @@ const global_settings = {
 const settings_ui_map = {}  // map of settings to UI elements
 
 // Summarization queue management
-let summarizationQueue = []  // queue of pending summarization tasks
+let summarization_queue = []  // queue of pending summarization tasks
 let activeWorkers = 0  // number of currently active workers
 let maxWorkers = 1  // maximum number of concurrent workers (will be set from settings)
 let last_worker_start_time = 0; // timestamp of the last worker start
@@ -198,6 +198,13 @@ function toast(message, type="info") {
     toastr[type](message, MODULE_NAME_FANCY);
 }
 const toast_debounced = debounce(toast, 500);
+
+class SummarizationStoppedError extends Error {
+    constructor(message = "Summarization stopped") {
+        super(message);
+        this.name = "SummarizationStoppedError";
+    }
+}
 
 const saveChatDebounced = debounce(() => getContext().saveChat(), debounce_timeout.relaxed);
 function count_tokens(text, padding = 0) {
@@ -3634,7 +3641,7 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 async function add_to_summarization_queue(index) {
     return new Promise((resolve, reject) => {
         // Add task to queue
-        summarizationQueue.push({
+        summarization_queue.push({
             index,
             resolve,
             reject
@@ -3660,7 +3667,7 @@ async function process_summarization_queue() {
         const time_delay = get_settings('summarization_time_delay') * 1000; // in milliseconds
 
         // Start workers if we have capacity and tasks
-        while (activeWorkers < maxWorkers && summarizationQueue.length > 0) {
+        while (activeWorkers < maxWorkers && summarization_queue.length > 0) {
             if (STOP_SUMMARIZATION) {
                 clear_summarization_queue();
                 return;
@@ -3676,13 +3683,13 @@ async function process_summarization_queue() {
             }
 
             // Re-check stop flag and queue length after potential delay
-            if (STOP_SUMMARIZATION || summarizationQueue.length === 0) {
+            if (STOP_SUMMARIZATION || summarization_queue.length === 0) {
                 clear_summarization_queue();
                 return;
             }
 
             last_worker_start_time = Date.now();
-            let task = summarizationQueue.shift();
+            let task = summarization_queue.shift();
             activeWorkers++;
 
             // Start worker (don't await - let it run in parallel)
@@ -3699,9 +3706,9 @@ async function process_summarization_queue() {
  */
 function clear_summarization_queue() {
     // Clear the queue and reject all pending tasks
-    while (summarizationQueue.length > 0) {
-        let task = summarizationQueue.shift();
-        task.reject(new Error("Summarization stopped"));
+    while (summarization_queue.length > 0) {
+        let task = summarization_queue.shift();
+        task.reject(new SummarizationStoppedError());
     }
 }
 
@@ -3748,7 +3755,7 @@ async function summarization_worker(task) {
     try {
         // Check if summarization was stopped
         if (STOP_SUMMARIZATION) {
-            task.reject(new Error("Summarization stopped"));
+            task.reject(new SummarizationStoppedError());
             return;
         }
 
@@ -3813,10 +3820,8 @@ async function summarize_messages(indexes=null, show_progress=true) {
     // Wait for all promises to resolve
     const results = await Promise.allSettled(promises);
     results.forEach(result => {
-        if (result.status === 'rejected') {
-            if (result.reason.message !== "Summarization stopped") {
-                console.error("A summarization task failed:", result.reason);
-            }
+        if (result.status === 'rejected' && !(result.reason instanceof SummarizationStoppedError)) {
+            console.error("A summarization task failed:", result.reason);
         }
     });
 
@@ -4018,7 +4023,7 @@ function collect_messages_to_auto_summarize() {
             continue;
         }
 
-        depth++
+        depth++;
 
         // don't include if below the lag value
         if (depth <= lag) {
