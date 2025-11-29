@@ -120,7 +120,6 @@ const default_settings = {
     auto_summarize: true,   // whether to automatically summarize new chat messages
     summarization_delay: 0,  // delay auto-summarization by this many messages (0 summarizes immediately after sending, 1 waits for one message, etc)
     summarization_time_delay: 0, // time in seconds to delay between summarizations
-    summarization_time_delay_skip_first: false,  // skip the first delay after a character message
     auto_summarize_batch_size: 1,  // number of messages to summarize at once when auto-summarizing
     auto_summarize_message_limit: 10,  // maximum number of messages to go back for auto-summarization.
     parallel_summaries_count: 1,  // number of summaries to do in parallel (1 = sequential)
@@ -3632,12 +3631,11 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
  * @param {boolean} [show_progress=true] - Whether to show the progress bar.
  * @returns {Promise<void>} A promise that resolves when the task is complete or rejects on error.
  */
-async function add_to_summarization_queue(index, show_progress=true) {
+async function add_to_summarization_queue(index) {
     return new Promise((resolve, reject) => {
         // Add task to queue
         summarizationQueue.push({
             index,
-            show_progress,
             resolve,
             reject
         });
@@ -3664,7 +3662,7 @@ async function process_summarization_queue() {
             return;
         }
 
-        if (time_delay > 0 && activeWorkers > 0) { // No delay for the very first worker
+        if (time_delay > 0 && last_worker_start_time > 0) {
             const time_since_last_start = Date.now() - last_worker_start_time;
             if (time_since_last_start < time_delay) {
                 const delay_needed = time_delay - time_since_last_start;
@@ -3797,7 +3795,7 @@ async function summarize_messages(indexes=null, show_progress=true) {
 
     // Create an array of promises
     const promises = indexes.map(index => {
-        return add_to_summarization_queue(index, show_progress)
+        return add_to_summarization_queue(index)
             .then(() => {
                 if (STOP_SUMMARIZATION) return;
                 completed_count++;
@@ -3809,11 +3807,18 @@ async function summarize_messages(indexes=null, show_progress=true) {
 
     // Wait for all promises to resolve
     try {
-        await Promise.all(promises);
+        const results = await Promise.allSettled(promises);
+        results.forEach(result => {
+            if (result.status === 'rejected') {
+                if (result.reason.message !== "Summarization stopped") {
+                    console.error("A summarization task failed:", result.reason);
+                }
+            }
+        });
     } catch (error) {
-        if (error.message !== "Summarization stopped") {
-            console.error("An error occurred during summarization:", error);
-        }
+        // This catch block might not be strictly necessary with allSettled,
+        // but it's good practice to have it for unexpected issues.
+        console.error("An unexpected error occurred during summarization:", error);
     }
 
 
@@ -4252,7 +4257,6 @@ function initialize_settings_listeners() {
     bind_setting('#parallel_summaries_count', 'parallel_summaries_count', 'number');
     bind_setting('#summarization_delay', 'summarization_delay', 'number');
     bind_setting('#summarization_time_delay', 'summarization_time_delay', 'number')
-    bind_setting('#summarization_time_delay_skip_first', 'summarization_time_delay_skip_first', 'boolean')
 
     bind_setting('#include_user_messages', 'include_user_messages', 'boolean');
     bind_setting('#include_system_messages', 'include_system_messages', 'boolean');
