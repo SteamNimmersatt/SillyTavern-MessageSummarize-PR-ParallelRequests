@@ -3703,7 +3703,6 @@ function clear_summarization_queue() {
         let task = summarizationQueue.shift();
         task.reject(new Error("Summarization stopped"));
     }
-    activeWorkers = 0;
 }
 
 /**
@@ -3749,7 +3748,6 @@ async function summarization_worker(task) {
     try {
         // Check if summarization was stopped
         if (STOP_SUMMARIZATION) {
-            clear_summarization_queue()
             task.reject(new Error("Summarization stopped"));
             return;
         }
