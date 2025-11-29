@@ -172,8 +172,8 @@ const global_settings = {
 const settings_ui_map = {}  // map of settings to UI elements
 
 // Summarization queue management
-let SUMMARIZATION_QUEUE = []  // queue of pending summarization tasks
-let ACTIVE_WORKERS = 0  // number of currently active workers
+let summarizationQueue = []  // queue of pending summarization tasks
+let activeWorkers = 0  // number of currently active workers
 let maxWorkers = 1  // maximum number of concurrent workers (will be set from settings)
 let last_worker_start_time = 0; // timestamp of the last worker start
 
@@ -3635,7 +3635,7 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 async function add_to_summarization_queue(index, show_progress=true) {
     return new Promise((resolve, reject) => {
         // Add task to queue
-        SUMMARIZATION_QUEUE.push({
+        summarizationQueue.push({
             index,
             show_progress,
             resolve,
@@ -3658,13 +3658,13 @@ async function process_summarization_queue() {
     const time_delay = get_settings('summarization_time_delay') * 1000; // in milliseconds
 
     // Start workers if we have capacity and tasks
-    while (ACTIVE_WORKERS < maxWorkers && SUMMARIZATION_QUEUE.length > 0) {
+    while (activeWorkers < maxWorkers && summarizationQueue.length > 0) {
         if (STOP_SUMMARIZATION) {
             clear_summarization_queue();
             return;
         }
 
-        if (time_delay > 0 && ACTIVE_WORKERS > 0) { // No delay for the very first worker
+        if (time_delay > 0 && activeWorkers > 0) { // No delay for the very first worker
             const time_since_last_start = Date.now() - last_worker_start_time;
             if (time_since_last_start < time_delay) {
                 const delay_needed = time_delay - time_since_last_start;
@@ -3674,14 +3674,14 @@ async function process_summarization_queue() {
         }
 
         // Re-check stop flag and queue length after potential delay
-        if (STOP_SUMMARIZATION || SUMMARIZATION_QUEUE.length === 0) {
+        if (STOP_SUMMARIZATION || summarizationQueue.length === 0) {
             clear_summarization_queue();
             return;
         }
 
         last_worker_start_time = Date.now();
-        let task = SUMMARIZATION_QUEUE.shift();
-        ACTIVE_WORKERS++;
+        let task = summarizationQueue.shift();
+        activeWorkers++;
 
         // Start worker (don't await - let it run in parallel)
         summarization_worker(task);
@@ -3694,11 +3694,11 @@ async function process_summarization_queue() {
  */
 function clear_summarization_queue() {
     // Clear the queue and reject all pending tasks
-    while (SUMMARIZATION_QUEUE.length > 0) {
-        let task = SUMMARIZATION_QUEUE.shift();
+    while (summarizationQueue.length > 0) {
+        let task = summarizationQueue.shift();
         task.reject(new Error("Summarization stopped"));
     }
-    ACTIVE_WORKERS = 0;
+    activeWorkers = 0;
 }
 
 /**
@@ -3757,13 +3757,13 @@ async function summarization_worker(task) {
     } catch (error) {
         task.reject(error);
     } finally {
-        ACTIVE_WORKERS--;
+        activeWorkers--;
         // Process next tasks in queue
         process_summarization_queue();
     }
 }
 
-async function summarize_messages(indexes=null, show_progress=true, skip_initial_delay=true) {
+async function summarize_messages(indexes=null, show_progress=true) {
     // Summarize the given list of message indexes (or a single index)
     let ctx = getContext();
 
@@ -4041,7 +4041,7 @@ function collect_messages_to_auto_summarize() {
     debug(`Messages to summarize (${messages_to_summarize.length}): ${messages_to_summarize}`)
     return messages_to_summarize.reverse()  // reverse for chronological order
 }
-async function auto_summarize_chat(skip_initial_delay=true) {
+async function auto_summarize_chat() {
     // Perform automatic summarization on the chat
     log('Auto-Summarizing chat...')
     let messages_to_summarize = collect_messages_to_auto_summarize()
@@ -4054,7 +4054,7 @@ async function auto_summarize_chat(skip_initial_delay=true) {
     }
 
     let show_progress = get_settings('auto_summarize_progress');
-    await summarize_messages(messages_to_summarize, show_progress, skip_initial_delay);
+    await summarize_messages(messages_to_summarize, show_progress);
 }
 
 // Event handling
@@ -4123,14 +4123,13 @@ async function on_chat_event(event=null, data=null) {
             if (!context.groupId && context.characterId === undefined) break; // no characters or group selected
             if (streamingProcessor && !streamingProcessor.isFinished) break;  // Streaming in-progress
 
-            let skip_first_delay = get_settings('summarization_time_delay_skip_first')
             if (last_message_swiped === index) {  // this is a swipe
                 let message = context.chat[index];
                 if (!get_settings('auto_summarize_on_swipe')) break;  // if auto-summarize on swipe is disabled, do nothing
                 if (!check_message_exclusion(message)) break;  // if the message is excluded, skip
                 if (!get_previous_swipe_memory(message, 'memory')) break;  // if the previous swipe doesn't have a memory, skip
                 debug("re-summarizing on swipe")
-                await summarize_messages(index, true, skip_first_delay);  // summarize the swiped message
+                await summarize_messages(index, true);  // summarize the swiped message
                 refresh_memory()
             } else if (last_message === index) {  // not a swipe, but the same index as last message - must be a continue
                 last_message_swiped = null
@@ -4138,14 +4137,14 @@ async function on_chat_event(event=null, data=null) {
                 if (!get_settings("auto_summarize_on_continue")) break;  // if auto_summarize_on_continue is disabled, no nothing
                 if (!get_memory(message, 'memory')) break;  // if the message doesn't have a memory, skip.
                 debug("re-summarizing on continue")
-                await summarize_messages(index, true, skip_first_delay);  // summarize the swiped message
+                await summarize_messages(index, true);  // summarize the swiped message
                 refresh_memory()
             } else { // not a swipe or continue
                 last_message_swiped = null
                 if (!get_settings('auto_summarize')) break;  // if auto-summarize is disabled, do nothing
                 if (get_settings("auto_summarize_on_send")) break;  // if auto_summarize_on_send is enabled, don't auto-summarize on character message
                 debug("New message detected, summarizing")
-                await auto_summarize_chat(skip_first_delay);  // auto-summarize the chat, skipping first delay if needed
+                await auto_summarize_chat();  // auto-summarize the chat
             }
             last_message = index;
             break;
