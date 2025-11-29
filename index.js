@@ -258,7 +258,7 @@ function get_current_character_identifier() {
 }
 function get_extension_directory() {
     // get the directory of the extension
-    let index_path = new URL(import.meta.url).pathname
+    let index_path = new URL(import.meta.url).pathname;
     return index_path.substring(0, index_path.lastIndexOf('/'))  // remove the /index.js from the path
 }
 function clean_string_for_html(text) {
@@ -3761,9 +3761,7 @@ async function summarization_worker(task) {
             return;
         }
 
-        await run_with_summary_settings(async () => {
-            await summarize_message(task.index);
-        });
+        await summarize_message(task.index);
 
         task.resolve();
     } catch (error) {
@@ -3775,7 +3773,7 @@ async function summarization_worker(task) {
     }
 }
 
-async function summarize_messages(indexes=null, show_progress=true) {
+async function summarize_messages(indexes = null, show_progress = true) {
     // Summarize the given list of message indexes (or a single index)
     let ctx = getContext();
 
@@ -3809,24 +3807,26 @@ async function summarize_messages(indexes=null, show_progress=true) {
 
     let completed_count = 0;
 
-    // Create an array of promises
-    const promises = indexes.map(index => {
-        return add_to_summarization_queue(index)
-            .then(() => {
-                if (STOP_SUMMARIZATION) return;
-                completed_count++;
-                if (show_progress) {
-                    progress_bar('summarize', completed_count, indexes.length, "Summarizing");
-                }
-            });
-    });
+    await run_with_summary_settings(async () => {
+        // Create an array of promises
+        const promises = indexes.map(index => {
+            return add_to_summarization_queue(index)
+                .then(() => {
+                    if (STOP_SUMMARIZATION) return;
+                    completed_count++;
+                    if (show_progress) {
+                        progress_bar('summarize', completed_count, indexes.length, "Summarizing");
+                    }
+                });
+        });
 
-    // Wait for all promises to resolve
-    const results = await Promise.allSettled(promises);
-    results.forEach(result => {
-        if (result.status === 'rejected' && !(result.reason instanceof SummarizationStoppedError)) {
-            console.error("A summarization task failed:", result.reason);
-        }
+        // Wait for all promises to resolve
+        const results = await Promise.allSettled(promises);
+        results.forEach(result => {
+            if (result.status === 'rejected' && !(result.reason instanceof SummarizationStoppedError)) {
+                console.error("A summarization task failed:", result.reason);
+            }
+        });
     });
 
 
