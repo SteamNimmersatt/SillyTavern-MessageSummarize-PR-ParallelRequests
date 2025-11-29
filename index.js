@@ -3641,6 +3641,7 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 async function add_to_summarization_queue(index) {
     return new Promise((resolve, reject) => {
         // Add task to queue
+        debug(`Adding message ${index} to summarization queue. Queue length: ${summarization_queue.length + 1}`);
         summarization_queue.push({
             index,
             resolve,
@@ -3658,6 +3659,7 @@ async function add_to_summarization_queue(index) {
  * if a time delay is configured.
  */
 async function process_summarization_queue() {
+    debug(`Processing queue. Active workers: ${activeWorkers}, Queue length: ${summarization_queue.length}`);
     if (isProcessingQueue) return;
     isProcessingQueue = true;
 
@@ -3776,6 +3778,8 @@ async function summarization_worker(task) {
 async function summarize_messages(indexes=null, show_progress=true) {
     // Summarize the given list of message indexes (or a single index)
     let ctx = getContext();
+
+    debug(`summarize_messages called with ${indexes?.length ?? 0} messages.`);
 
     if (indexes === null) {  // default to the mose recent message, min 0
         indexes = [Math.max(ctx.chat.length - 1, 0)]
@@ -4053,12 +4057,14 @@ function collect_messages_to_auto_summarize() {
 async function auto_summarize_chat() {
     // Perform automatic summarization on the chat
     log('Auto-Summarizing chat...')
+    debug(`Auto-summarize settings: batch_size=${get_settings('auto_summarize_batch_size')}, delay=${get_settings('summarization_delay')}, message_limit=${get_settings('auto_summarize_message_limit')}`);
     let messages_to_summarize = collect_messages_to_auto_summarize()
 
     // If we don't have enough messages to batch, don't summarize
     let messages_to_batch = get_settings('auto_summarize_batch_size');  // number of messages to summarize in a batch
+    debug(`Collected ${messages_to_summarize.length} messages. Batch size setting is ${messages_to_batch}.`)
     if (messages_to_summarize.length < messages_to_batch) {
-        debug(`Not enough messages (${messages_to_summarize.length}) to summarize in a batch (${messages_to_batch})`)
+        debug(`Not enough messages to meet batch size. Aborting auto-summary.`)
         messages_to_summarize = []
     }
 
