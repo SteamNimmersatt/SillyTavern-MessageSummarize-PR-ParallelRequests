@@ -171,7 +171,7 @@ const global_settings = {
 }
 const settings_ui_map = {}  // map of settings to UI elements
 
-// Parallel summarization queue management
+// Summarization queue management
 let SUMMARIZATION_QUEUE = []  // queue of pending summarization tasks
 let ACTIVE_WORKERS = 0  // number of currently active workers
 let MAX_WORKERS = 1  // maximum number of concurrent workers (will be set from settings)
@@ -3625,7 +3625,6 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 
 
 // Summarization
-// Worker pool for parallel summarization
 async function add_to_summarization_queue(index, show_progress=true, skip_initial_delay=true) {
     return new Promise((resolve, reject) => {
         // Add task to queue
@@ -3665,6 +3664,35 @@ function clear_summarization_queue() {
     ACTIVE_WORKERS = 0;
 }
 
+async function run_with_summary_settings(callback) {
+    // Save the current completion preset and connection profile
+    const summary_preset = get_settings('completion_preset');
+    const current_preset = await get_current_preset();
+    const summary_profile = get_settings('connection_profile');
+    const current_profile = await get_current_connection_profile();
+
+    try {
+        // Set the completion preset and connection profile for summarization
+        if (summary_profile && summary_profile !== current_profile) {
+            await set_connection_profile(summary_profile);
+        }
+        if (summary_preset && summary_preset !== current_preset) {
+            await set_preset(summary_preset);
+        }
+
+        await callback();
+
+    } finally {
+        // Restore the completion preset and connection profile
+        if (summary_profile && summary_profile !== current_profile) {
+            await set_connection_profile(current_profile);
+        }
+        if (summary_preset && summary_preset !== current_preset) {
+            await set_preset(current_preset);
+        }
+    }
+}
+
 async function summarization_worker(task) {
     try {
         // Check if summarization was stopped
@@ -3674,22 +3702,9 @@ async function summarization_worker(task) {
             return;
         }
 
-        // Save the current completion preset and connection profile
-        let summary_preset = get_settings('completion_preset');
-        let current_preset = await get_current_preset();
-        let summary_profile = get_settings('connection_profile');
-        let current_profile = await get_current_connection_profile();
-
-        // Set the completion preset and connection profile for summarization
-        await set_connection_profile(summary_profile);
-        await set_preset(summary_preset);
-
-        // Process single message
-        await summarize_message(task.index);
-
-        // Restore the completion preset and connection profile
-        await set_connection_profile(current_profile);
-        await set_preset(current_preset);
+        await run_with_summary_settings(async () => {
+            await summarize_message(task.index);
+        });
 
         task.resolve();
     } catch (error) {
@@ -3706,14 +3721,14 @@ async function summarize_messages(indexes=null, show_progress=true, skip_initial
     let ctx = getContext();
 
     if (indexes === null) {  // default to the mose recent message, min 0
-        indexes = [Math.max(chat.length - 1, 0)]
+        indexes = [Math.max(ctx.chat.length - 1, 0)]
     }
     indexes = Array.isArray(indexes) ? indexes : [indexes]  // cast to array if only one given
     if (!indexes.length) return;
 
     debug(`Summarizing ${indexes.length} messages`)
 
-     // only show progress if there's more than one message to summarize
+    // only show progress if there's more than one message to summarize
     show_progress = show_progress && indexes.length > 1;
 
     // set stop flag to false just in case
@@ -3725,117 +3740,46 @@ async function summarize_messages(indexes=null, show_progress=true, skip_initial
         ctx.deactivateSendButtons();
     }
 
-    // Save the current completion preset (must happen before you set the connection profile because it changes the preset)
-    let summary_preset = get_settings('completion_preset');
-    let current_preset = await get_current_preset();
+    // Clear summarization queue
+    clear_summarization_queue();
 
-    // Get the current connection profile
-    let summary_profile = get_settings('connection_profile');
-    let current_profile = await get_current_connection_profile()
+    if (show_progress) {
+        progress_bar('summarize', 0, indexes.length, "Summarizing");
+    }
 
-    // set the completion preset and connection profile for summarization (preset must be set after connection profile)
-    await set_connection_profile(summary_profile);
-    await set_preset(summary_preset);
+    let completed_count = 0;
 
-    // Get parallel processing setting
-    let parallel_count = get_settings('parallel_summaries_count') || 1;
-
-    if (parallel_count > 1 && indexes !== null && (!Array.isArray(indexes) || indexes.length === 1)) {
-        // Use queue for single message requests when parallel processing is enabled
-        let index = Array.isArray(indexes) ? indexes[0] : indexes;
-        return await add_to_summarization_queue(index, show_progress, skip_initial_delay);
-    } else if (parallel_count > 1 && indexes.length > 1) {
-        // Parallel processing for multiple messages
-        debug(`Using parallel processing with ${parallel_count} concurrent requests`);
-
-        let completed = 0;
-
-        // Process messages in batches
-        for (let batch_start = 0; batch_start < indexes.length; batch_start += parallel_count) {
-            if (STOP_SUMMARIZATION) {
-                log('Summarization stopped');
-                break;
-            }
-
-            let batch = indexes.slice(batch_start, batch_start + parallel_count);
-            debug(`Processing batch: [${batch.join(", ")}]`);
-
-            // Update progress bar for batch start
-            if (show_progress) {
-                progress_bar('summarize', completed + 1, indexes.length, `Batch: [${batch.join(", ")}]`);
-            }
-
-            // Add delay before batch (except first batch if skip_initial_delay is true)
-            if (batch_start > 0 || !skip_initial_delay) {
-                let time_delay = get_settings('summarization_time_delay');
-                if (time_delay > 0) {
-                    debug(`Delaying batch by ${time_delay} seconds`);
-                    if (show_progress) progress_bar('summarize', null, null, "Delaying");
-                    await new Promise((resolve) => {
-                        SUMMARIZATION_DELAY_TIMEOUT = setTimeout(resolve, time_delay * 1000)
-                        SUMMARIZATION_DELAY_RESOLVE = resolve
-                    });
-
-                    // check if summarization was stopped during delay
-                    if (STOP_SUMMARIZATION) {
-                        log('Summarization stopped');
-                        break;
-                    }
-                }
-            }
-
-            // Process batch in parallel
-            let batch_promises = batch.map(async (index) => {
+    // Create an array of promises
+    const promises = indexes.map(index => {
+        return add_to_summarization_queue(index, show_progress, skip_initial_delay)
+            .then(() => {
                 if (STOP_SUMMARIZATION) return;
-                return await summarize_message(index);
-            });
-
-            // Wait for all messages in batch to complete
-            await Promise.all(batch_promises);
-            completed += batch.length;
-
-            // Update progress after batch completion
-            if (show_progress) {
-                progress_bar('summarize', completed, indexes.length, `Completed: ${completed}/${indexes.length}`);
-            }
-        }
-    } else {
-        // Sequential processing (original behavior)
-        let n = 0;
-        for (let i of indexes) {
-            if (show_progress) progress_bar('summarize', n+1, indexes.length, "Summarizing");
-
-            // check if summarization was stopped by the user
-            if (STOP_SUMMARIZATION) {
-                log('Summarization stopped');
-                break;
-            }
-
-            // Wait for time delay if set (only delay first if initial delay set)
-            let time_delay = get_settings('summarization_time_delay')
-            if (time_delay > 0 && (n > 0 || (n === 0 && !skip_initial_delay))) {
-                debug(`Delaying generation by ${time_delay} seconds`)
-                if (show_progress) progress_bar('summarize', null, null, "Delaying")
-                await new Promise((resolve) => {
-                    SUMMARIZATION_DELAY_TIMEOUT = setTimeout(resolve, time_delay * 1000)
-                    SUMMARIZATION_DELAY_RESOLVE = resolve  // store the resolve function to call when cleared
-                });
-
-                // check if summarization was stopped by the user during the delay
-                if (STOP_SUMMARIZATION) {
-                    log('Summarization stopped');
-                    break;
+                completed_count++;
+                if (show_progress) {
+                    progress_bar('summarize', completed_count, indexes.length, "Summarizing");
                 }
-            }
+            });
+    });
 
-            await summarize_message(i);
-            n += 1;
+    // Wait for all promises to resolve
+    try {
+        await Promise.all(promises);
+    } catch (error) {
+        if (error.message !== "Summarization stopped") {
+            console.error("An error occurred during summarization:", error);
         }
     }
 
-    // restore the completion preset and connection profile
-    await set_connection_profile(current_profile);
-    await set_preset(current_preset);
+    // Handle summarization time delay
+    let time_delay = get_settings('summarization_time_delay');
+    if (time_delay > 0 && !skip_initial_delay && !STOP_SUMMARIZATION) {
+        debug(`Delaying for ${time_delay} seconds`);
+        if (show_progress) progress_bar('summarize', completed_count, indexes.length, "Delaying");
+        await new Promise((resolve) => {
+            SUMMARIZATION_DELAY_TIMEOUT = setTimeout(resolve, time_delay * 1000);
+            SUMMARIZATION_DELAY_RESOLVE = resolve;
+        });
+    }
 
     // remove the progress bar
     if (show_progress) remove_progress_bar('summarize')
@@ -3872,7 +3816,7 @@ async function summarize_message(index) {
     memoryEditInterface.update_message_visuals(index, null, false, "Summarizing...")
 
     // If the most recent message, scroll to the bottom to get the summary in view (affected by ST settings)
-    if (index === chat.length - 1) {
+    if (index === context.chat.length - 1) {
         scrollChatToBottom();
     }
 
@@ -3941,7 +3885,7 @@ async function summarize_message(index) {
     memoryEditInterface.update_message_visuals(index, null, false, true)
 
     // If the most recent message, scroll to the bottom
-    if (index === chat.length - 1) {
+    if (index === context.chat.length - 1) {
         scrollChatToBottom()
     }
 }
