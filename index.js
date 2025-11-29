@@ -175,6 +175,7 @@ let summarizationQueue = []  // queue of pending summarization tasks
 let activeWorkers = 0  // number of currently active workers
 let maxWorkers = 1  // maximum number of concurrent workers (will be set from settings)
 let last_worker_start_time = 0; // timestamp of the last worker start
+let isProcessingQueue = false;
 
 // Utility functions
 function log() {
@@ -3628,7 +3629,6 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 /**
  * Adds a message summarization task to the processing queue.
  * @param {number} index - The index of the message to summarize.
- * @param {boolean} [show_progress=true] - Whether to show the progress bar.
  * @returns {Promise<void>} A promise that resolves when the task is complete or rejects on error.
  */
 async function add_to_summarization_queue(index) {
@@ -3651,38 +3651,45 @@ async function add_to_summarization_queue(index) {
  * if a time delay is configured.
  */
 async function process_summarization_queue() {
-    // Update max workers from settings
-    maxWorkers = get_settings('parallel_summaries_count') || 1;
-    const time_delay = get_settings('summarization_time_delay') * 1000; // in milliseconds
+    if (isProcessingQueue) return;
+    isProcessingQueue = true;
 
-    // Start workers if we have capacity and tasks
-    while (activeWorkers < maxWorkers && summarizationQueue.length > 0) {
-        if (STOP_SUMMARIZATION) {
-            clear_summarization_queue();
-            return;
-        }
+    try {
+        // Update max workers from settings
+        maxWorkers = get_settings('parallel_summaries_count') || 1;
+        const time_delay = get_settings('summarization_time_delay') * 1000; // in milliseconds
 
-        if (time_delay > 0 && last_worker_start_time > 0) {
-            const time_since_last_start = Date.now() - last_worker_start_time;
-            if (time_since_last_start < time_delay) {
-                const delay_needed = time_delay - time_since_last_start;
-                debug(`Delaying next worker start by ${delay_needed}ms`);
-                await delay(delay_needed);
+        // Start workers if we have capacity and tasks
+        while (activeWorkers < maxWorkers && summarizationQueue.length > 0) {
+            if (STOP_SUMMARIZATION) {
+                clear_summarization_queue();
+                return;
             }
+
+            if (time_delay > 0 && last_worker_start_time > 0) {
+                const time_since_last_start = Date.now() - last_worker_start_time;
+                if (time_since_last_start < time_delay) {
+                    const delay_needed = time_delay - time_since_last_start;
+                    debug(`Delaying next worker start by ${delay_needed}ms`);
+                    await delay(delay_needed);
+                }
+            }
+
+            // Re-check stop flag and queue length after potential delay
+            if (STOP_SUMMARIZATION || summarizationQueue.length === 0) {
+                clear_summarization_queue();
+                return;
+            }
+
+            last_worker_start_time = Date.now();
+            let task = summarizationQueue.shift();
+            activeWorkers++;
+
+            // Start worker (don't await - let it run in parallel)
+            summarization_worker(task);
         }
-
-        // Re-check stop flag and queue length after potential delay
-        if (STOP_SUMMARIZATION || summarizationQueue.length === 0) {
-            clear_summarization_queue();
-            return;
-        }
-
-        last_worker_start_time = Date.now();
-        let task = summarizationQueue.shift();
-        activeWorkers++;
-
-        // Start worker (don't await - let it run in parallel)
-        summarization_worker(task);
+    } finally {
+        isProcessingQueue = false;
     }
 }
 
@@ -3806,20 +3813,14 @@ async function summarize_messages(indexes=null, show_progress=true) {
     });
 
     // Wait for all promises to resolve
-    try {
-        const results = await Promise.allSettled(promises);
-        results.forEach(result => {
-            if (result.status === 'rejected') {
-                if (result.reason.message !== "Summarization stopped") {
-                    console.error("A summarization task failed:", result.reason);
-                }
+    const results = await Promise.allSettled(promises);
+    results.forEach(result => {
+        if (result.status === 'rejected') {
+            if (result.reason.message !== "Summarization stopped") {
+                console.error("A summarization task failed:", result.reason);
             }
-        });
-    } catch (error) {
-        // This catch block might not be strictly necessary with allSettled,
-        // but it's good practice to have it for unexpected issues.
-        console.error("An unexpected error occurred during summarization:", error);
-    }
+        }
+    });
 
 
     // remove the progress bar
