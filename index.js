@@ -3005,7 +3005,7 @@ class SummaryPromptEditInterface {
         }
 
         if (macro.type === "preset") {  // range presets
-           return this.compute_range_macro(index, macro)
+            return this.compute_range_macro(index, macro)
         } else if (macro.type === "custom") {  // STScript
             let text = await this.evaluate_script(macro, index, "")
             if (text && macro.instruct_template) {
