@@ -174,7 +174,8 @@ const settings_ui_map = {}  // map of settings to UI elements
 // Summarization queue management
 let SUMMARIZATION_QUEUE = []  // queue of pending summarization tasks
 let ACTIVE_WORKERS = 0  // number of currently active workers
-let MAX_WORKERS = 1  // maximum number of concurrent workers (will be set from settings)
+let maxWorkers = 1  // maximum number of concurrent workers (will be set from settings)
+let last_worker_start_time = 0; // timestamp of the last worker start
 
 // Utility functions
 function log() {
@@ -3625,13 +3626,18 @@ globalThis.memory_intercept_messages = function (chat, _contextSize, _abort, typ
 
 
 // Summarization
-async function add_to_summarization_queue(index, show_progress=true, skip_initial_delay=true) {
+/**
+ * Adds a message summarization task to the processing queue.
+ * @param {number} index - The index of the message to summarize.
+ * @param {boolean} [show_progress=true] - Whether to show the progress bar.
+ * @returns {Promise<void>} A promise that resolves when the task is complete or rejects on error.
+ */
+async function add_to_summarization_queue(index, show_progress=true) {
     return new Promise((resolve, reject) => {
         // Add task to queue
         SUMMARIZATION_QUEUE.push({
             index,
             show_progress,
-            skip_initial_delay,
             resolve,
             reject
         });
@@ -3641,12 +3647,39 @@ async function add_to_summarization_queue(index, show_progress=true, skip_initia
     });
 }
 
+/**
+ * Processes the summarization queue, starting workers for pending tasks.
+ * It respects the maximum number of concurrent workers and staggers their start times
+ * if a time delay is configured.
+ */
 async function process_summarization_queue() {
     // Update max workers from settings
-    MAX_WORKERS = get_settings('parallel_summaries_count') || 1;
+    maxWorkers = get_settings('parallel_summaries_count') || 1;
+    const time_delay = get_settings('summarization_time_delay') * 1000; // in milliseconds
 
     // Start workers if we have capacity and tasks
-    while (ACTIVE_WORKERS < MAX_WORKERS && SUMMARIZATION_QUEUE.length > 0) {
+    while (ACTIVE_WORKERS < maxWorkers && SUMMARIZATION_QUEUE.length > 0) {
+        if (STOP_SUMMARIZATION) {
+            clear_summarization_queue();
+            return;
+        }
+
+        if (time_delay > 0 && ACTIVE_WORKERS > 0) { // No delay for the very first worker
+            const time_since_last_start = Date.now() - last_worker_start_time;
+            if (time_since_last_start < time_delay) {
+                const delay_needed = time_delay - time_since_last_start;
+                debug(`Delaying next worker start by ${delay_needed}ms`);
+                await delay(delay_needed);
+            }
+        }
+
+        // Re-check stop flag and queue length after potential delay
+        if (STOP_SUMMARIZATION || SUMMARIZATION_QUEUE.length === 0) {
+            clear_summarization_queue();
+            return;
+        }
+
+        last_worker_start_time = Date.now();
         let task = SUMMARIZATION_QUEUE.shift();
         ACTIVE_WORKERS++;
 
@@ -3655,6 +3688,10 @@ async function process_summarization_queue() {
     }
 }
 
+/**
+ * Clears the summarization queue and rejects all pending tasks.
+ * Resets the active worker count to 0.
+ */
 function clear_summarization_queue() {
     // Clear the queue and reject all pending tasks
     while (SUMMARIZATION_QUEUE.length > 0) {
@@ -3664,6 +3701,11 @@ function clear_summarization_queue() {
     ACTIVE_WORKERS = 0;
 }
 
+/**
+ * A wrapper function that temporarily applies summary-specific settings (connection profile, preset),
+ * executes an async callback, and then restores the original settings.
+ * @param {Function} callback - The async function to execute with the temporary settings.
+ */
 async function run_with_summary_settings(callback) {
     // Save the current completion preset and connection profile
     const summary_preset = get_settings('completion_preset');
@@ -3693,6 +3735,11 @@ async function run_with_summary_settings(callback) {
     }
 }
 
+/**
+ * The core worker function that performs a single summarization task.
+ * It calls the summarization logic within the safety of run_with_summary_settings.
+ * @param {object} task - The task object from the queue.
+ */
 async function summarization_worker(task) {
     try {
         // Check if summarization was stopped
@@ -3733,7 +3780,6 @@ async function summarize_messages(indexes=null, show_progress=true, skip_initial
 
     // set stop flag to false just in case
     STOP_SUMMARIZATION = false
-    clear_summarization_queue()
 
     // optionally block user from sending chat messages while summarization is in progress
     if (get_settings('block_chat')) {
@@ -3751,7 +3797,7 @@ async function summarize_messages(indexes=null, show_progress=true, skip_initial
 
     // Create an array of promises
     const promises = indexes.map(index => {
-        return add_to_summarization_queue(index, show_progress, skip_initial_delay)
+        return add_to_summarization_queue(index, show_progress)
             .then(() => {
                 if (STOP_SUMMARIZATION) return;
                 completed_count++;
@@ -3770,16 +3816,6 @@ async function summarize_messages(indexes=null, show_progress=true, skip_initial
         }
     }
 
-    // Handle summarization time delay
-    let time_delay = get_settings('summarization_time_delay');
-    if (time_delay > 0 && !skip_initial_delay && !STOP_SUMMARIZATION) {
-        debug(`Delaying for ${time_delay} seconds`);
-        if (show_progress) progress_bar('summarize', completed_count, indexes.length, "Delaying");
-        await new Promise((resolve) => {
-            SUMMARIZATION_DELAY_TIMEOUT = setTimeout(resolve, time_delay * 1000);
-            SUMMARIZATION_DELAY_RESOLVE = resolve;
-        });
-    }
 
     // remove the progress bar
     if (show_progress) remove_progress_bar('summarize')
