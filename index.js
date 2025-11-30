@@ -4065,7 +4065,7 @@ async function auto_summarize_chat() {
     debug(`Collected ${messages_to_summarize.length} messages. Batch size setting is ${messages_to_batch}.`)
     if (messages_to_summarize.length < messages_to_batch) {
         debug(`Not enough messages to meet batch size. Aborting auto-summary.`)
-        messages_to_summarize = []
+        return;
     }
 
     let show_progress = get_settings('auto_summarize_progress');
