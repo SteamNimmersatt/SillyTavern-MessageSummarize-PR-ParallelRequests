@@ -120,6 +120,7 @@ const default_settings = {
     auto_summarize: true,   // whether to automatically summarize new chat messages
     summarization_delay: 0,  // delay auto-summarization by this many messages (0 summarizes immediately after sending, 1 waits for one message, etc)
     summarization_time_delay: 0, // time in seconds to delay between summarizations
+    summarization_time_delay_skip_first: false,  // skip the first delay after a character message
     auto_summarize_batch_size: 1,  // number of messages to summarize at once when auto-summarizing
     auto_summarize_message_limit: 10,  // maximum number of messages to go back for auto-summarization.
     parallel_summaries_count: 1,  // number of summaries to do in parallel (1 = sequential)
@@ -176,6 +177,7 @@ let activeWorkers = 0  // number of currently active workers
 let maxWorkers = 1  // maximum number of concurrent workers (will be set from settings)
 let last_worker_start_time = 0; // timestamp of the last worker start
 let isProcessingQueue = false;
+let skip_next_summarization_delay = false;
 
 // Utility functions
 function log() {
@@ -3675,12 +3677,17 @@ async function process_summarization_queue() {
                 return;
             }
 
-            if (time_delay > 0 && last_worker_start_time > 0) {
-                const time_since_last_start = Date.now() - last_worker_start_time;
-                if (time_since_last_start < time_delay) {
-                    const delay_needed = time_delay - time_since_last_start;
-                    debug(`Delaying next worker start by ${delay_needed}ms`);
-                    await delay(delay_needed);
+            if (time_delay > 0) {
+                if (skip_next_summarization_delay) {
+                    skip_next_summarization_delay = false;
+                    debug("Skipping summarization delay for the first worker in the batch.");
+                } else {
+                    const time_since_last_start = Date.now() - last_worker_start_time;
+                    if (time_since_last_start < time_delay) {
+                        const delay_needed = time_delay - time_since_last_start;
+                        debug(`Delaying next worker start by ${delay_needed}ms`);
+                        await delay(delay_needed);
+                    }
                 }
             }
 
@@ -4068,6 +4075,12 @@ async function auto_summarize_chat() {
         return;
     }
 
+    // Handling of setting 'summarization_time_delay_skip_first'.
+    if (get_settings('summarization_time_delay_skip_first') && get_settings('summarization_time_delay') > 0) {
+        debug("The next summarization batch will skip the first delay.");
+        skip_next_summarization_delay = true;
+    }
+
     let show_progress = get_settings('auto_summarize_progress');
     await summarize_messages(messages_to_summarize, show_progress);
 }
@@ -4267,6 +4280,7 @@ function initialize_settings_listeners() {
     bind_setting('#parallel_summaries_count', 'parallel_summaries_count', 'number');
     bind_setting('#summarization_delay', 'summarization_delay', 'number');
     bind_setting('#summarization_time_delay', 'summarization_time_delay', 'number')
+    bind_setting('#summarization_time_delay_skip_first', 'summarization_time_delay_skip_first', 'boolean')
 
     bind_setting('#include_user_messages', 'include_user_messages', 'boolean');
     bind_setting('#include_system_messages', 'include_system_messages', 'boolean');
